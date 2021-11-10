@@ -1,7 +1,7 @@
 #!/bin/bash
 
 MIN_CPU_NUMBER=4
-MIN_RAM_SIZE=16
+MIN_RAM_SIZE=15
 MIN_FREE_DISK_SPACE=30
 
 if [[ $EUID -ne 0 ]]; then
@@ -84,14 +84,10 @@ function check_host() {
 }
 
 check_host "api.snapcraft.io"
-#check_host "auth.docker.io"
-#check_host "fastly.cdn.snapcraft.io"
 check_host "gcr.io"
 check_host "googlecode.l.googleusercontent.com"
 check_host "k8s.gcr.io"
 check_host "production.cloudflare.docker.com"
-#check_host "quay.io"
-#check_host "registry-1.docker.io"
 check_host "storage.googleapis.com"
 
 if [[ $NO_ERROR == true ]]
