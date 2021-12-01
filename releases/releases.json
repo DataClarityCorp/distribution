@@ -5,6 +5,7 @@
       "version": "2021.5",
       "imageTag": "latest-2021.5",
       "updatedServices": ["all"],
+      "description": "DataClarity <strong>2021.5</strong> is now available!",
       "releaseNotes": "https://support.dataclaritycorp.com/hc/en-us/articles/4410216609044-2021-3-2021-4-DataClarity-New-Features-and-Enhancements"
     },
     {
@@ -12,6 +13,7 @@
       "version": "2021.5.1",
       "imageTag": "latest-2021.5.1",
       "updatedServices": ["storyboards","data-server","data-prep"],
+      "description": "DataClarity <strong>2021.5.1</strong> is now available!",
       "releaseNotes": "https://support.dataclaritycorp.com/hc/en-us/articles/4410216609044-2021-3-2021-4-DataClarity-New-Features-and-Enhancements"
     }
   ]
