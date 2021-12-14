@@ -1,4 +1,14 @@
 {
+  "2021.6": [
+    {
+      "date": "November 30, 2021",
+      "version": "2021.6",
+      "imageTag": "latest-2021.6",
+      "updatedServices": ["all"],
+      "description": "DataClarity 2021.6 is now available!",
+      "releaseNotes": "https://support.dataclaritycorp.com/hc/en-us/articles/4410216609044-2021-3-2021-4-DataClarity-New-Features-and-Enhancements"
+    }
+  ],
   "2021.5": [
     {
       "date": "November 30, 2021",
