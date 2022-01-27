@@ -2,7 +2,7 @@
   "2021.4": [
     {
       "date": "November 30, 2021",
-      "version": "2021.5",
+      "version": "2021.4",
       "imageTag": "latest-2021.4",
       "updatedServices": ["all"],
       "description": "DataClarity 2021.4 is now available!",
