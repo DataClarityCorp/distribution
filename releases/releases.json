@@ -8,5 +8,15 @@
       "description": "DataClarity 2021.4 is now available!",
       "releaseNotes": "https://support.dataclaritycorp.com/hc/en-us/articles/4410216609044-2021-3-2021-4-DataClarity-New-Features-and-Enhancements"
     }
+  ],
+  "2022.1": [
+    {
+      "date": "March 23, 2022",
+      "version": "2022.1",
+      "imageTag": "latest-2022.1",
+      "updatedServices": ["all"],
+      "description": "DataClarity 2022.1 is now available!",
+      "releaseNotes": "https://support.dataclaritycorp.com/hc/en-us/articles/4410216609044-2021-3-2021-4-DataClarity-New-Features-and-Enhancements"
+    }
   ]
 }
