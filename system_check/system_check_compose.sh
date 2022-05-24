@@ -1,8 +1,9 @@
 #!/bin/bash
 
-MIN_CPU_NUMBER=4
-MIN_RAM_SIZE=16
-MIN_FREE_DISK_SPACE=30
+MIN_CPU_NUMBER=8
+MIN_RAM_SIZE=31
+MIN_FREE_DISK_SPACE=95
+OSID=$(cat /etc/os-release | grep "ID" -m1)
 
 if [[ $EUID -ne 0 ]]; then
    echo "This script must be run as root."
@@ -34,7 +35,11 @@ fi
 
 function check_port() {
   PORT=$1
-  PORT_USAGE=$(lsof -i:"$PORT" | grep LISTEN)
+  if [ "$OSID" = 'ID="rhel"' ] || [ "$OSID" = 'ID="centos"' ]; then
+    PORT_USAGE=$(ss -nutlp | grep "$PORT")
+  else
+    PORT_USAGE=$(lsof -i:"$PORT" | grep LISTEN)
+  fi
   if [[ -n $PORT_USAGE ]]
 then
   echo "Port $PORT is already in use."
