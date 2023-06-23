@@ -1,0 +1,191 @@
+﻿Description: 'Deploy a DataClarity cluster'
+Parameters:
+  Cluster:
+    Type: String
+    Description: AWS EC2 instance specs
+    AllowedValues:
+      - 4-vCPUs-16-GB-RAM-150-GB-SSD
+      - 4-vCPUs-32-GB-RAM-150-GB-SSD
+      - 8-vCPUs-32-GB-RAM-300-GB-SSD
+      - 8-vCPUs-64-GB-RAM-300-GB-SSD
+    Default: 8-vCPUs-32-GB-RAM-300-GB-SSD
+  AvailabilityZone:
+    Type: String
+    Description: "Deployment region"
+    AllowedValues:
+      - us-east-1a
+      - us-west-1a
+      - eu-west-1a
+      - eu-west-3a
+    Default: us-east-1a
+  OS:
+    Type: String
+    AllowedValues:
+      - Ubuntu-Server-20-04-LTS
+      - Ubuntu-Server-22-04-LTS
+    Default: Ubuntu-Server-22-04-LTS
+  TLS:
+    Description: Disable or enable TLS using a self-signed certificate created on the fly
+    Type: String
+    AllowedValues:
+      - Disable
+      - Enable
+    Default: Enable
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      Label:
+        default: DataClarity Cluster
+      Parameters:
+        - AvailabilityZone
+        - InstanceType
+        - OS
+        - TLS
+        - RAM
+        - DiskSize
+        - AMI
+    ParameterLabels:
+      AvailabilityZone:
+        default: "Select an availability zone"
+      InstanceType:
+        default: "Select the type and size of the cluster"
+      OS:
+        default: "Select the Linux distribution"
+      TLS:
+        default: "Select a TLS option"
+Mappings:
+  InstanceTypes:
+    4-vCPUs-16-GB-RAM-150-GB-SSD:
+      InstanceType: m5d.xlarge
+      RAM: 16
+      DiskSize: 150
+    4-vCPUs-32-GB-RAM-150-GB-SSD:
+      InstanceType: r5dn.xlarge
+      RAM: 32
+      DiskSize: 150
+    8-vCPUs-32-GB-RAM-300-GB-SSD:
+      InstanceType: m5ad.2xlarge
+      RAM: 32
+      DiskSize: 300
+    8-vCPUs-64-GB-RAM-300-GB-SSD:
+      InstanceType: r5ad.2xlarge
+      RAM: 64
+      DiskSize: 300
+  OS:
+    Ubuntu-Server-20-04-LTS: 
+      AMI: ami-0261755bbcb8c4a84
+    Ubuntu-Server-22-04-LTS:
+      AMI: ami-053b0d53c279acc90
+Conditions:
+  isHTTPS: !Equals [ !Ref TLS, Enable]
+  isHTTP: !Equals [ !Ref TLS, Disable]
+Resources:
+  DataClarityInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      AvailabilityZone: !Ref AvailabilityZone
+      ImageId: !FindInMap [OS, !Ref OS, AMI]
+      InstanceType: !FindInMap [InstanceTypes, !Ref Cluster, InstanceType]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !FindInMap [InstanceTypes, !Ref Cluster, DiskSize]
+            DeleteOnTermination: true
+            VolumeType: gp2
+      UserData:
+        Fn::Base64: !Sub
+          - | 
+            #!/bin/bash
+            
+            # Install Docker and Docker Compose
+            apt-get update
+            apt-get install ca-certificates curl gnupg -y
+            
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            chmod a+r /etc/apt/keyrings/docker.gpg
+            
+            echo \
+            "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+            tee /etc/apt/sources.list.d/docker.list > /dev/null
+            
+            apt-get update
+            apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
+            
+            usermod -aG docker ubuntu
+            
+            systemctl enable docker.service
+            systemctl enable containerd.service
+            
+            # Download and untar the DataClarity package
+            curl -L https://github.com/DataClarityCorp/distribution/raw/main/compose/aws/dataclarity.tar.gz -o /opt/dataclarity.tar.gz
+            tar -zxf /opt/dataclarity.tar.gz -C /opt
+            chmod -R 777 /opt/dataclarity
+            cd /opt/dataclarity/
+            
+            # Setup a self-signed certificate
+            if [[ ${TLS} = "Enable" ]]; then
+              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=${IP}" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt
+              sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' docker-compose.yml
+              sed -i 's|http://{host}|https://{host}|g' docker-compose.yml
+              sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/notification/application.properties
+              sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/ui/config.json
+              rm assets/config/load-balancer/nginx.conf
+              mv assets/config/load-balancer/nginx_ssl.conf assets/config/load-balancer/nginx.conf
+            else
+              rm assets/config/load-balancer/nginx_ssl.conf
+            fi
+            
+            # Update the entry point with the IP, in the config files
+            sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" docker-compose.yml
+            sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/notification/application.properties
+            sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/ui/config.json
+            
+            if [[ ${RAM} = "16" ]]; then
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 9G|g" docker-compose.yml
+            elif [[ ${RAM} = "64" ]]; then
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 48G|g" docker-compose.yml
+            fi
+            
+            # Create the DataClarity persistent volumes
+            docker volume create pgdata
+            docker volume create zkdata
+            docker volume create zklogs
+            docker volume create drill-dfs
+            docker volume create screenshots-storage
+            
+            # Create the DataClarity containers
+            docker compose up -d
+          - TLS: !Ref TLS
+            RAM: !FindInMap [InstanceTypes, !Ref Cluster, RAM]
+            IP: $(curl http://checkip.amazonaws.com)
+
+      SecurityGroups:
+        - !Ref DCSecurityGroup
+  DCSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access via port 22
+      SecurityGroupIngress:
+      - CidrIp: 0.0.0.0/0
+        FromPort: 22
+        ToPort: 22
+        IpProtocol: tcp
+      - CidrIp: "0.0.0.0/0"
+        FromPort: 80
+        ToPort: 80
+        IpProtocol: tcp
+      - CidrIp: "0.0.0.0/0"
+        FromPort: 443
+        ToPort: 443
+        IpProtocol: tcp
+Outputs:
+  DataClarityUI:
+    Description: "Use this URL to access DataClarity"
+    Condition: isHTTPS
+    Value: !Join [ "", ["https://", !GetAtt DataClarityInstance.PublicIp, "/home"]]
+  DataClarityUI:
+    Description: "Use this URL to access DataClarity"
+    Condition: isHTTP
+    Value: !Join [ "", ["http://", !GetAtt DataClarityInstance.PublicIp, "/home"]]
