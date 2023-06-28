@@ -1,4 +1,4 @@
-﻿Description: 'Deploy a DataClarity cluster'
+Description: 'Deploy a DataClarity cluster'
 Parameters:
   Cluster:
     Type: String
@@ -31,28 +31,42 @@ Parameters:
       - Disable
       - Enable
     Default: Enable
+  CustomPassword:
+    Description: Enter master console password with a minimum length of 12 characters (leave blank to use generated password)
+    Type: String
+    NoEcho: true
+    MaxLength: 100
+    Default: ''
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
-      Label:
-        default: DataClarity Cluster
-      Parameters:
-        - AvailabilityZone
-        - InstanceType
-        - OS
-        - TLS
-        - RAM
-        - DiskSize
-        - AMI
+      -
+        Label:
+          default: DataClarity Cluster
+        Parameters:
+          - AvailabilityZone
+          - Cluster
+          - OS
+          - TLS
+          - RAM
+          - DiskSize
+          - AMI
+      -
+        Label:
+          default: DataClarity App Configuration
+        Parameters:
+          - CustomPassword
     ParameterLabels:
       AvailabilityZone:
         default: "Select an availability zone"
-      InstanceType:
+      Cluster:
         default: "Select the type and size of the cluster"
       OS:
         default: "Select the Linux distribution"
       TLS:
         default: "Select a TLS option"
+      CustomPassword:
+        default: "Password for master console"
 Mappings:
   InstanceTypes:
     4-vCPUs-16-GB-RAM-150-GB-SSD:
@@ -79,8 +93,26 @@ Mappings:
 Conditions:
   isHTTPS: !Equals [ !Ref TLS, Enable]
   isHTTP: !Equals [ !Ref TLS, Disable]
+  isRandomPassword: !Equals [!Ref CustomPassword, ""]
 Resources:
-  DataClarityInstance:
+  DCSecretsManager:
+    Type: AWS::SecretsManager::Secret
+    Condition: isRandomPassword
+    Properties:
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "dcadmin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 12
+        ExcludePunctuation: true
+  DCRandomPassword:
+    Type: AWS::SSM::Parameter
+    Condition: isRandomPassword
+    Properties:
+      Name: RandomString
+      Type: String
+      Value:
+        Fn::Sub: "{{resolve:secretsmanager:${DCSecretsManager}::password}}"
+  DCInstance:
     Type: AWS::EC2::Instance
     Properties:
       AvailabilityZone: !Ref AvailabilityZone
@@ -96,7 +128,7 @@ Resources:
         Fn::Base64: !Sub
           - | 
             #!/bin/bash
-            
+                        
             # Install Docker and Docker Compose
             apt-get update
             apt-get install ca-certificates curl gnupg -y
@@ -142,6 +174,9 @@ Resources:
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/notification/application.properties
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/ui/config.json
             
+            # Update password, in the env file
+            sed -i "s|\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=${PASSWORD}|g" .env
+            
             if [[ ${RAM} = "16" ]]; then
             sed -i "s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 9G|g" docker-compose.yml
             elif [[ ${RAM} = "64" ]]; then
@@ -160,7 +195,7 @@ Resources:
           - TLS: !Ref TLS
             RAM: !FindInMap [InstanceTypes, !Ref Cluster, RAM]
             IP: $(curl http://checkip.amazonaws.com)
-
+            PASSWORD: !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
       SecurityGroups:
         - !Ref DCSecurityGroup
   DCSecurityGroup:
@@ -181,11 +216,29 @@ Resources:
         ToPort: 443
         IpProtocol: tcp
 Outputs:
-  DataClarityUI:
-    Description: "Use this URL to access DataClarity"
-    Condition: isHTTPS
-    Value: !Join [ "", ["https://", !GetAtt DataClarityInstance.PublicIp, "/home"]]
-  DataClarityUI:
-    Description: "Use this URL to access DataClarity"
-    Condition: isHTTP
-    Value: !Join [ "", ["http://", !GetAtt DataClarityInstance.PublicIp, "/home"]]
+  ApplicationURL:
+    Description: "Use this URL to access DataClarity (Username: admin, Password: admin)"
+    Value:
+      !If
+        - isHTTPS
+        - !Join [ "", ["https://", !GetAtt DCInstance.PublicIp, "/home"]]
+        - !Join [ "", ["http://", !GetAtt DCInstance.PublicIp, "/home"]]
+  MasterConsoleURL:
+    Description: "DataClarity Master Console"
+    Value:
+      Fn::If:
+        - isHTTPS
+        - Fn::Join:
+            - ""
+            - - "https://"
+              - !GetAtt DCInstance.PublicIp
+              - "/auth/admin/master/console "
+              - "Use this URL to access DataClarity Master Console (Username: dcadmin, Password: "
+              - !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
+        - Fn::Join:
+            - ""
+            - - "http://"
+              - !GetAtt DCInstance.PublicIp
+              - "/auth/admin/master/console "
+              - "Use this URL to access DataClarity Master Console (Username: dcadmin, Password: "
+              - !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
