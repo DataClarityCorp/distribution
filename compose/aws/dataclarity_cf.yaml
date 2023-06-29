@@ -1,6 +1,6 @@
 Description: 'Deploy a DataClarity cluster'
 Parameters:
-  Cluster:
+  InstanceType:
     Type: String
     Description: AWS EC2 instance specs
     AllowedValues:
@@ -9,21 +9,6 @@ Parameters:
       - 8-vCPUs-32-GB-RAM-300-GB-SSD
       - 8-vCPUs-64-GB-RAM-300-GB-SSD
     Default: 8-vCPUs-32-GB-RAM-300-GB-SSD
-  AvailabilityZone:
-    Type: String
-    Description: "Deployment region"
-    AllowedValues:
-      - us-east-1a
-      - us-west-1a
-      - eu-west-1a
-      - eu-west-3a
-    Default: us-east-1a
-  OS:
-    Type: String
-    AllowedValues:
-      - Ubuntu-Server-20-04-LTS
-      - Ubuntu-Server-22-04-LTS
-    Default: Ubuntu-Server-22-04-LTS
   TLS:
     Description: Disable or enable TLS using a self-signed certificate created on the fly
     Type: String
@@ -32,7 +17,7 @@ Parameters:
       - Enable
     Default: Enable
   CustomPassword:
-    Description: Enter master console password with a minimum length of 12 characters (leave blank to use generated password)
+    Description: Enter the master console password with a minimum length of 12 characters (leave the field blank to randomly generate a password)
     Type: String
     NoEcho: true
     MaxLength: 100
@@ -44,9 +29,7 @@ Metadata:
         Label:
           default: DataClarity Cluster
         Parameters:
-          - AvailabilityZone
-          - Cluster
-          - OS
+          - InstanceType
           - TLS
           - RAM
           - DiskSize
@@ -57,12 +40,8 @@ Metadata:
         Parameters:
           - CustomPassword
     ParameterLabels:
-      AvailabilityZone:
-        default: "Select an availability zone"
-      Cluster:
+      InstanceType:
         default: "Select the type and size of the cluster"
-      OS:
-        default: "Select the Linux distribution"
       TLS:
         default: "Select a TLS option"
       CustomPassword:
@@ -85,11 +64,61 @@ Mappings:
       InstanceType: r5ad.2xlarge
       RAM: 64
       DiskSize: 300
-  OS:
-    Ubuntu-Server-20-04-LTS: 
-      AMI: ami-0261755bbcb8c4a84
-    Ubuntu-Server-22-04-LTS:
-      AMI: ami-053b0d53c279acc90
+  OS: # Ubuntu Server 22.04 LTS
+    af-south-1: # Africa (Cape Town)
+      AMI: ami-0bd6e451a0211224f
+    ap-east-1: # Asia Pacific (Hong Kong)
+      AMI: ami-051699ed177bc3d67
+    ap-northeast-1: # Asia Pacific (Tokyo)
+      AMI: ami-0c597cc9c10ca9088
+    ap-northeast-2: # Asia Pacific (Seoul)
+      AMI: ami-0502b8f5f0ca3ed7d
+    ap-northeast-3: # Asia Pacific (Osaka)
+      AMI: ami-040b504c67641f0cc
+    ap-south-1: # Asia Pacific (Mumbai)	
+      AMI: ami-0dc886bce1f85f67e
+    ap-south-2 : # Asia Pacific (Hyderabad)
+      AMI: ami-04d2538aa74707978
+    ap-southeast-1: # Asia Pacific (Singapore)
+      AMI: ami-0d21214905506a7f4
+    ap-southeast-2: # Asia Pacific (Sydney)
+      AMI: ami-09fb5e610ae14ee00
+    ap-southeast-3: # Asia Pacific (Jakarta)
+      AMI: ami-0f2e6ee654b98f96b
+    ap-southeast-4: # Asia Pacific (Melbourne)
+      AMI: ami-0de6423a6e32d147d
+    ca-central-1: # Canada (Central)
+      AMI: ami-02da4d5de61d161c5
+    eu-central-1: # Europe (Frankfurt)
+      AMI: ami-03f1cc6c8b9c0b899
+    eu-central-2: # Europe (Zurich)
+      AMI: ami-083714d0ac0c1a80a
+    eu-north-1: # Europe (Stockholm)
+      AMI: ami-05baaef454dd96656
+    eu-south-1: # Europe (Milan)
+      AMI: ami-0faa5fa8924e8b7de
+    eu-south-2: # Europe (Spain)
+      AMI: ami-0b308244dcf4a624a
+    eu-west-1: # Europe (Ireland)
+      AMI: ami-0786f5bc3943ad52d
+    eu-west-2: # Europe (London)
+      AMI: ami-0ccdcf8ea5cace030
+    eu-west-3: # Europe (Paris)
+      AMI: ami-0b108d96bcb0de81c
+    me-central-1: # Middle East (UAE)
+      AMI: ami-050fa395f4aaae15d
+    me-south-1: # Middle East (Bahrain)
+      AMI: ami-0515452e9b0f40e44
+    sa-east-1: # South America (São Paulo)
+      AMI: ami-0cd79c08dc1353a91
+    us-east-1: # US East (N. Virginia)
+      AMI: ami-003d3d03cfe1b0468
+    us-east-2: # US East (Ohio)
+      AMI: ami-05f4e4084abd205cf
+    us-west-1: # US West (N. California)
+      AMI: ami-0ff832bdf91944651
+    us-west-2: # US West (Oregon)
+      AMI: ami-032f8589b3e7f4e5b
 Conditions:
   isHTTPS: !Equals [ !Ref TLS, Enable]
   isHTTP: !Equals [ !Ref TLS, Disable]
@@ -115,13 +144,12 @@ Resources:
   DCInstance:
     Type: AWS::EC2::Instance
     Properties:
-      AvailabilityZone: !Ref AvailabilityZone
-      ImageId: !FindInMap [OS, !Ref OS, AMI]
-      InstanceType: !FindInMap [InstanceTypes, !Ref Cluster, InstanceType]
+      ImageId: !FindInMap [OS, !Ref "AWS::Region", AMI]
+      InstanceType: !FindInMap [InstanceTypes, !Ref InstanceType, InstanceType]
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: !FindInMap [InstanceTypes, !Ref Cluster, DiskSize]
+            VolumeSize: !FindInMap [InstanceTypes, !Ref InstanceType, DiskSize]
             DeleteOnTermination: true
             VolumeType: gp2
       UserData:
@@ -193,7 +221,7 @@ Resources:
             # Create the DataClarity containers
             docker compose up -d
           - TLS: !Ref TLS
-            RAM: !FindInMap [InstanceTypes, !Ref Cluster, RAM]
+            RAM: !FindInMap [InstanceTypes, !Ref InstanceType, RAM]
             IP: $(curl http://checkip.amazonaws.com)
             PASSWORD: !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
       SecurityGroups:
