@@ -9,6 +9,13 @@ Parameters:
       - 8-vCPUs-32-GB-RAM-300-GB-SSD
       - 8-vCPUs-64-GB-RAM-300-GB-SSD
     Default: 8-vCPUs-32-GB-RAM-300-GB-SSD
+  AssociatePublicIpAddress:
+    Type: String
+    Default: 'Yes'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Description: Associate a public IP for the instance. Disable the public IP only if you are using an AWS VPN. If you are unsure, leave this value as 'Yes' or consult your network administrator
   TLS:
     Description: Disable or enable TLS using a self-signed certificate created on the fly
     Type: String
@@ -16,6 +23,15 @@ Parameters:
       - Disable
       - Enable
     Default: Enable
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "(Required) Select an EC2 key pair to allow remote connections to the VM, via SSH. Username: ubuntu (has sudo privileges)"
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: (Required) VPC to deploy the cluster into
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: (Required) Subnet to deploy the cluster into. Must be in the selected VPC
   CustomPassword:
     Description: Enter a password for the master console, with a maximum length of 32 (leave the field blank to randomly generate a password)
     Type: String
@@ -30,7 +46,11 @@ Metadata:
           default: DataClarity Cluster
         Parameters:
           - InstanceType
+          - AssociatePublicIpAddress
           - TLS
+          - KeyPair
+          - VPC
+          - Subnet
           - RAM
           - DiskSize
           - AMI
@@ -42,6 +62,10 @@ Metadata:
     ParameterLabels:
       InstanceType:
         default: "Select the type and size of the cluster"
+      AssociatePublicIpAddress:
+        default: "Choose whether to associate a public IP or not"
+      KeyPair:
+        default: "AWS Key Pair"
       CustomPassword:
         default: "Password for the master console"
 Mappings:
@@ -120,6 +144,17 @@ Mappings:
 Conditions:
   isHTTPS: !Equals [ !Ref TLS, Enable]
   isRandomPassword: !Equals [!Ref CustomPassword, ""]
+  hasPublicIp: !Equals [!Ref AssociatePublicIpAddress, "Yes"]
+Rules:
+  SubnetsInVPC:
+    Assertions:
+      - Assert:
+          'Fn::EachMemberIn':
+            - 'Fn::ValueOfAll':
+                - 'AWS::EC2::Subnet::Id'
+                - VpcId
+            - 'Fn::RefAll': 'AWS::EC2::VPC::Id'
+        AssertDescription: The selected subnet must be in the VPC
 Resources:
   DCSecretsManager:
     Type: AWS::SecretsManager::Secret
@@ -149,6 +184,7 @@ Resources:
             VolumeSize: !FindInMap [InstanceTypes, !Ref InstanceType, DiskSize]
             DeleteOnTermination: true
             VolumeType: gp2
+      KeyName: !Ref KeyPair
       UserData:
         Fn::Base64: !Sub
           - | 
@@ -199,7 +235,7 @@ Resources:
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/notification/application.properties
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/ui/config.json
             
-            # Update password, in the env file
+            # Update dcadmin password, in the env file
             sed -i "s|\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=${PASSWORD}|g" .env
             
             if [[ ${RAM} = "16" ]]; then
@@ -219,14 +255,19 @@ Resources:
             docker compose up -d
           - TLS: !Ref TLS
             RAM: !FindInMap [InstanceTypes, !Ref InstanceType, RAM]
-            IP: $(curl http://checkip.amazonaws.com)
+            IP: !If [hasPublicIp, $(curl http://checkip.amazonaws.com), $(curl http://169.254.169.254/latest/meta-data/local-ipv4)]
             PASSWORD: !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
-      SecurityGroups:
-        - !Ref DCSecurityGroup
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: !If [hasPublicIp , "true", "false"]
+          GroupSet: 
+            - !Ref DCSecurityGroup
+          SubnetId: !Ref Subnet
+          DeviceIndex: 0
   DCSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Enable SSH access via port 22
+      VpcId: !Ref VPC
+      GroupDescription: Ingress configuration
       SecurityGroupIngress:
       - CidrIp: 0.0.0.0/0
         FromPort: 22
@@ -247,7 +288,7 @@ Outputs:
       Fn::Join:
         - ""
         - - !If [isHTTPS, "https://", "http://"]
-          - !GetAtt DataClarityInstance.PublicIp
+          - !If [hasPublicIp, !GetAtt DataClarityInstance.PublicIp, !GetAtt DataClarityInstance.PrivateIp]
           - "/home"
   DataClarityUsrPwd:
     Description: "Use these credentials to log into DataClarity"
@@ -260,7 +301,7 @@ Outputs:
       Fn::Join:
         - ""
         - - !If [isHTTPS, "https://", "http://"]
-          - !GetAtt DataClarityInstance.PublicIp
+          - !If [hasPublicIp, !GetAtt DataClarityInstance.PublicIp, !GetAtt DataClarityInstance.PrivateIp]
           - "/auth/admin/master/console"
   MasterConsoleUsrPwd:
     Description: "Use these credentials to log into the DataClarity Master Console"
