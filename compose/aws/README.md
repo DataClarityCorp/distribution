@@ -1,6 +1,6 @@
 # Deploying DataClarity Is Free Forever (DIFF) to AWS
 
-## Prerequisite for VPC version
+### Prerequisite for VPC version
 * An AWS key pair created
 * A VPC and subnet created if you want to install to a non-default VPC
 * Permission to create Security Groups
