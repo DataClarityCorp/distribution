@@ -1,0 +1,382 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.20.4.51522",
+      "templateHash": "6775840007586973372"
+    }
+  },
+  "parameters": {
+    "instanceSize": {
+      "type": "string",
+      "defaultValue": "8-vCPUs-32-GB-RAM-300-GB-SSD",
+      "allowedValues": [
+        "4-vCPUs-16-GB-RAM-150-GB-SSD",
+        "4-vCPUs-32-GB-RAM-150-GB-SSD",
+        "8-vCPUs-32-GB-RAM-300-GB-SSD",
+        "8-vCPUs-64-GB-RAM-300-GB-SSD"
+      ],
+      "metadata": {
+        "description": "The size of the VM"
+      }
+    },
+    "VirtualMachineName": {
+      "type": "string",
+      "defaultValue": "dataclarity",
+      "metadata": {
+        "description": "The name of you Virtual Machine."
+      }
+    },
+    "VirtualMachineAdminUser": {
+      "type": "string",
+      "defaultValue": "dcuser",
+      "metadata": {
+        "description": "Username for the Virtual Machine."
+      }
+    },
+    "VirtualMachineAuthenticationType": {
+      "type": "string",
+      "defaultValue": "password",
+      "allowedValues": [
+        "sshPublicKey",
+        "password"
+      ],
+      "metadata": {
+        "description": "Type of authentication used to connect to the Virtual Machine. SSH key is recommended."
+      }
+    },
+    "VirtualMachineAdminPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password for the Virtual Machine."
+      }
+    },
+    "DataclarityAuthenticationMasterPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Password for the 'dcadmin' user, used to authentication in the DataClarity User Access master console."
+      }
+    },
+    "TLS": {
+      "type": "string",
+      "defaultValue": "Enable",
+      "allowedValues": [
+        "Disable",
+        "Enable"
+      ],
+      "metadata": {
+        "description": "Disable or enable TLS using a self-signed certificate created on the fly."
+      }
+    },
+    "associatePublicIpAddress": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Associate a Public IP to this Virtual Machine."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for all resources."
+      }
+    },
+    "virtualNetworkName": {
+      "type": "string",
+      "defaultValue": "dataclarity-vnet",
+      "metadata": {
+        "description": "Name of the VNET"
+      }
+    },
+    "subnetName": {
+      "type": "string",
+      "defaultValue": "dataclarity-subnet",
+      "metadata": {
+        "description": "Name of the subnet in the virtual network"
+      }
+    },
+    "networkSecurityGroupName": {
+      "type": "string",
+      "defaultValue": "dataclarity-nsg",
+      "metadata": {
+        "description": "Name of the Network Security Group"
+      }
+    }
+  },
+  "variables": {
+    "instances": {
+      "4-vCPUs-16-GB-RAM-150-GB-SSD": {
+        "vmSize": "Standard_D4s_v5",
+        "osDiskType": "StandardSSD_ZRS",
+        "osDiskSize": 150
+      },
+      "4-vCPUs-32-GB-RAM-150-GB-SSD": {
+        "vmSize": "Standard_E4s_v5",
+        "osDiskType": "StandardSSD_ZRS",
+        "osDiskSize": 150
+      },
+      "8-vCPUs-32-GB-RAM-300-GB-SSD": {
+        "vmSize": "Standard_D8s_v5",
+        "osDiskType": "StandardSSD_ZRS",
+        "osDiskSize": 300
+      },
+      "8-vCPUs-64-GB-RAM-300-GB-SSD": {
+        "vmSize": "Standard_E8s_v5",
+        "osDiskType": "StandardSSD_ZRS",
+        "osDiskSize": 300
+      }
+    },
+    "publicIPAddressName": "[format('{0}-pip', parameters('VirtualMachineName'))]",
+    "networkInterfaceName": "[format('{0}-nic', parameters('VirtualMachineName'))]",
+    "subnetAddressPrefix": "10.1.0.0/24",
+    "addressPrefix": "10.1.0.0/16",
+    "securityProfileJson": {
+      "uefiSettings": {
+        "secureBootEnabled": true,
+        "vTpmEnabled": true
+      },
+      "securityType": "[variables('securityType')]"
+    },
+    "securityType": "TrustedLaunch",
+    "extensionName": "GuestAttestation",
+    "extensionPublisher": "Microsoft.Azure.Security.LinuxAttestation",
+    "extensionVersion": "1.0",
+    "maaTenantName": "GuestAttestation",
+    "maaEndpoint": "[substring('emptystring', 0, 0)]",
+    "linuxConfiguration": {
+      "disablePasswordAuthentication": true,
+      "ssh": {
+        "publicKeys": [
+          {
+            "path": "[format('/home/{0}/.ssh/authorized_keys', parameters('VirtualMachineAdminUser'))]",
+            "keyData": "[parameters('VirtualMachineAdminPassword')]"
+          }
+        ]
+      }
+    },
+    "protocol": "[if(equals(parameters('TLS'), 'enabled'), 'https', 'http')]",
+    "scriptContent": "[concat('#!/bin/bash\n\n# Fetch Public IP\nIP=',toLower(format('{0}-{1}.{2}', parameters('VirtualMachineName'), uniqueString(resourceGroup().id),parameters('location'))),'.cloudapp.azure.com\n\n# Fetch the amount of RAM from /proc/meminfo\nmemInfo=$(grep MemTotal /proc/meminfo | awk ''{print $2}'')\nRAM=$(awk \"BEGIN {printf \\\"%.0f\\n\\\", $memInfo / 1024 / 1024 + 0.5}\")\n\n# Password for DCAdmin\nPASSWORD=\"', parameters('DataclarityAuthenticationMasterPassword'), '\"\n\n# TLS\nTLS=\"', parameters('TLS'), '\"\n\n# Install Docker and Docker Compose\napt-get update\napt-get install ca-certificates curl gnupg -y\n\ninstall -m 0755 -d /etc/apt/keyrings\ncurl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --yes --dearmor -o /etc/apt/keyrings/docker.gpg\nchmod a+r /etc/apt/keyrings/docker.gpg\n\necho \\\n\"deb [arch=\"$(dpkg --print-architecture)\" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \\\n$(. /etc/os-release && echo \"$VERSION_CODENAME\") stable\" | \\\ntee /etc/apt/sources.list.d/docker.list > /dev/null\n\napt-get update\napt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y\n\nsystemctl enable docker.service\nsystemctl enable containerd.service\n\n# Download and untar the DataClarity package\ncurl -L https://github.com/DataClarityCorp/distribution/raw/main/compose/aws/dataclarity.tar.gz -o /opt/dataclarity.tar.gz\ntar -zxf /opt/dataclarity.tar.gz -C /opt\nchmod -R 777 /opt/dataclarity\ncd /opt/dataclarity/\n\nif [[ $TLS = \"Enable\" ]]; then\n  sudo apt-get install -y certbot\n  sudo certbot certonly --standalone -d \"${IP}\" --register-unsafely-without-email --agree-tos --deploy-hook \"cp /etc/letsencrypt/live/${IP}/privkey.pem /opt/dataclarity/assets/certs/dc/cert.key; cp /etc/letsencrypt/live/${IP}/fullchain.pem /opt/dataclarity/assets/certs/dc/cert.crt\"\n if [[ $? -ne 0 ]]; then\n    openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj \"/CN=$IP\" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt\n  fi\n  sed -i ''s|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g'' docker-compose.yml\n  sed -i ''s|http://{host}|https://{host}|g'' docker-compose.yml\n  sed -i ''s|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g'' assets/config/notification/application.properties\n  sed -i ''s|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g'' assets/config/ui/config.json\n  rm assets/config/load-balancer/nginx.conf\n  mv assets/config/load-balancer/nginx_ssl.conf assets/config/load-balancer/nginx.conf\nfi\n# Update the entry point with the IP, in the config files\nsed -i \"s|\\$PUBLIC_ENTRYPOINT|$IP|g\" docker-compose.yml\nsed -i \"s|\\$PUBLIC_ENTRYPOINT|$IP|g\" assets/config/notification/application.properties\nsed -i \"s|\\$PUBLIC_ENTRYPOINT|$IP|g\" assets/config/ui/config.json\n\n# Update dcadmin password, in the env file\nsed -i \"s|\\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=$PASSWORD|g\" .env\n\nif [[ $RAM = \"16\" ]]; then\n  sed -i \"s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 9G|g\" docker-compose.yml\nelif [[ $RAM = \"64\" ]]; then\n  sed -i \"s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 48G|g\" docker-compose.yml\nfi\n\n# Create the DataClarity persistent volumes\ndocker volume create pgdata\ndocker volume create zkdata\ndocker volume create zklogs\ndocker volume create drill-dfs\ndocker volume create screenshots-storage\n\n# Create the DataClarity containers\ndocker compose up -d')]"
+ },
+  "resources": [
+    {
+      "condition": "[parameters('associatePublicIpAddress')]",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('publicIPAddressName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "Basic"
+      },
+      "properties": {
+        "publicIPAllocationMethod": "Dynamic",
+        "publicIPAddressVersion": "IPv4",
+        "dnsSettings": {
+          "domainNameLabel": "[toLower(format('{0}-{1}', parameters('VirtualMachineName'), uniqueString(resourceGroup().id)))]"
+        },
+        "idleTimeoutInMinutes": 4
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('networkInterfaceName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('virtualNetworkName'), parameters('subnetName'))]"
+              },
+              "privateIPAllocationMethod": "Dynamic",
+              "publicIPAddress": "[if(parameters('associatePublicIpAddress'), createObject('id', resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))), null())]"
+            }
+          }
+        ],
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('networkSecurityGroupName'))]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkSecurityGroups', parameters('networkSecurityGroupName'))]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks/subnets', parameters('virtualNetworkName'), parameters('subnetName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('networkSecurityGroupName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "SSH",
+            "properties": {
+              "priority": 100,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          },
+          {
+            "name": "HTTP",
+            "properties": {
+              "priority": 110,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "80"
+            }
+          },
+          {
+            "name": "HTTPS",
+            "properties": {
+              "priority": 120,
+              "protocol": "Tcp",
+              "access": "Allow",
+              "direction": "Inbound",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2022-09-01",
+      "name": "[parameters('virtualNetworkName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": {
+          "addressPrefixes": [
+            "[variables('addressPrefix')]"
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "apiVersion": "2022-09-01",
+      "name": "[format('{0}/{1}', parameters('virtualNetworkName'), parameters('subnetName'))]",
+      "properties": {
+        "addressPrefix": "[variables('subnetAddressPrefix')]",
+        "privateEndpointNetworkPolicies": "Enabled",
+        "privateLinkServiceNetworkPolicies": "Enabled"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2022-08-01",
+      "name": "[parameters('VirtualMachineName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "hardwareProfile": {
+          "vmSize": "[variables('instances')[parameters('instanceSize')].vmSize]"
+        },
+        "storageProfile": {
+          "osDisk": {
+            "createOption": "FromImage",
+            "name": "[format('{0}-osdisk', parameters('VirtualMachineName'))]",
+            "diskSizeGB": "[variables('instances')[parameters('instanceSize')].osDiskSize]",
+            "managedDisk": {
+              "storageAccountType": "[variables('instances')[parameters('instanceSize')].osDiskType]"
+            }
+          },
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest"
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceName'))]"
+            }
+          ]
+        },
+        "osProfile": {
+          "computerName": "[parameters('VirtualMachineName')]",
+          "adminUsername": "[parameters('VirtualMachineAdminUser')]",
+          "adminPassword": "[parameters('VirtualMachineAdminPassword')]",
+          "linuxConfiguration": "[if(equals(parameters('VirtualMachineAuthenticationType'), 'password'), null(), variables('linuxConfiguration'))]",
+          "customData": "[base64(variables('scriptContent'))]"
+        },
+        "securityProfile": "[if(equals(variables('securityType'), 'TrustedLaunch'), variables('securityProfileJson'), null())]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/networkInterfaces', variables('networkInterfaceName'))]"
+      ]
+    },
+    {
+      "condition": "[and(equals(variables('securityType'), 'TrustedLaunch'), and(equals(variables('securityProfileJson').uefiSettings.secureBootEnabled, true()), equals(variables('securityProfileJson').uefiSettings.vTpmEnabled, true())))]",
+      "type": "Microsoft.Compute/virtualMachines/extensions",
+      "apiVersion": "2022-08-01",
+      "name": "[format('{0}/{1}', parameters('VirtualMachineName'), variables('extensionName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "publisher": "[variables('extensionPublisher')]",
+        "type": "[variables('extensionName')]",
+        "typeHandlerVersion": "[variables('extensionVersion')]",
+        "autoUpgradeMinorVersion": true,
+        "enableAutomaticUpgrade": true,
+        "settings": {
+          "AttestationConfig": {
+            "MaaSettings": {
+              "maaEndpoint": "[variables('maaEndpoint')]",
+              "maaTenantName": "[variables('maaTenantName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Compute/virtualMachines', parameters('VirtualMachineName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "sshCommand": {
+      "type": "string",
+      "value": "[if(parameters('associatePublicIpAddress'), format('ssh {0}@{1}', parameters('VirtualMachineAdminUser'), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName')), '2022-09-01').dnsSettings.fqdn), format('ssh {0}@{1}', parameters('VirtualMachineAdminUser'), reference(variables('virtualNetworkSubnetId')).addressPrefix))]"
+    },
+    "applicationStartNotice": {
+      "type": "string",
+      "value": "Please note that it may take 5-10 minutes for the application to fully start. Please wait for the application to become operational before accessing the URL."
+    },
+    "applicationURL": {
+      "type": "string",
+      "value": "[if(equals(parameters('TLS'), 'Enable'), concat(if(parameters('associatePublicIpAddress'), 'https://', 'http://'), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName')), '2022-09-01').dnsSettings.fqdn), concat(if(parameters('associatePublicIpAddress'), 'https://', 'http://'), reference(variables('virtualNetworkSubnetId')).addressPrefix))]"
+    },
+    "applicationURLCredentials": {
+      "type": "string",
+      "value": "Use these credentials to log into DataClarity. Username: admin | Password: admin. You will be required to change admin user password on the first login."
+    },
+    "applicationMasterConsoleURL": {
+    "type": "string",
+   "value": "[concat(if(equals(parameters('TLS'), 'Enable'), 'https://', 'http://'), if(parameters('associatePublicIpAddress'), reference(resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName')), '2022-09-01').dnsSettings.fqdn, reference(variables('virtualNetworkSubnetId')).addressPrefix), '/auth/admin/master/console')]"
+   },
+    "applicationMasterConsoleURLCredentials": {
+      "type": "string",
+      "value": "Use these credentials to log into DataClarity User Access Master Console. Username: dcadmin | Password: the value you set when you configured this deployment."
+    }
+  }
+}
