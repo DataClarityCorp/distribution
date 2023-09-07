@@ -1,4 +1,4 @@
-# Deploying DataClarity Is Free Forever (DIFF) to AWS
+# Deploying DataClarity Analytics Unlimited to AWS
 
 ### Prerequisite for VPC version
 * An AWS key pair created
