@@ -1,4 +1,4 @@
-# Deploying DataClarity Analytics Unlimited to AWS and Azure
+# Deploy DataClarity Analytics Unlimited to AWS and Azure
 
 &nbsp; 
 ## AWS
