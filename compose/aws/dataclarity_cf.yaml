@@ -1,4 +1,44 @@
+AWSTemplateFormatVersion: 2010-09-09
+
 Description: 'Deploy a DataClarity cluster'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: AWS Instance
+        Parameters:
+          - InstanceType
+          - AssociatePublicIpAddress
+          - KeyPair
+          - VPC
+          - Subnet
+          - RAM
+          - DiskSize
+          - AMI
+          - SecurityGroup
+
+      - Label:
+          default: DataClarity Application
+        Parameters:
+          - TLS
+          - AuthenticationMasterPassword
+       
+    ParameterLabels:
+      InstanceType:
+        default: "The size of the Virtual Machine"
+      SecurityGroup:
+        default: "AWS Security Group"
+      KeyPair:
+        default: "AWS Key Pair Name"
+      VPC:
+        default: "AWS VPC Id"
+      Subnet:
+        default: "AWS Subnet Id"
+      AssociatePublicIpAddress:
+        default: "Associate Public IP Address"
+      AuthenticationMasterPassword:
+        default: "Password for the User Access Master Console"
 Parameters:
   InstanceType:
     Type: String
@@ -9,6 +49,13 @@ Parameters:
       - 8-vCPUs-32-GB-RAM-300-GB-SSD
       - 8-vCPUs-64-GB-RAM-300-GB-SSD
     Default: 8-vCPUs-32-GB-RAM-300-GB-SSD
+  AssociatePublicIpAddress:
+    Type: String
+    Default: 'Yes'
+    AllowedValues:
+      - 'Yes'
+      - 'No'
+    Description: Associate a public IP for the instance. Disable the public IP only if you are using an AWS VPN. If you are unsure, leave this value as 'Yes' or consult your network administrator
   TLS:
     Description: Disable or enable TLS using a self-signed certificate created on the fly
     Type: String
@@ -16,34 +63,24 @@ Parameters:
       - Disable
       - Enable
     Default: Enable
-  CustomPassword:
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "(Required) Select an EC2 key pair to allow remote connections to the VM, via SSH. Username: ubuntu (has sudo privileges)"
+  VPC:
+    Type: AWS::EC2::VPC::Id
+    Description: (Required) VPC to deploy the cluster into
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: (Required) Subnet to deploy the cluster into. Must be in the selected VPC
+  AuthenticationMasterPassword:
     Description: Enter a password for the master console, with a maximum length of 32 (leave the field blank to randomly generate a password)
     Type: String
     NoEcho: true
     MaxLength: 32
     Default: ''
-Metadata:
-  AWS::CloudFormation::Interface:
-    ParameterGroups:
-      -
-        Label:
-          default: DataClarity Cluster
-        Parameters:
-          - InstanceType
-          - TLS
-          - RAM
-          - DiskSize
-          - AMI
-      -
-        Label:
-          default: DataClarity App Configuration
-        Parameters:
-          - CustomPassword
-    ParameterLabels:
-      InstanceType:
-        default: "Select the type and size of the cluster"
-      CustomPassword:
-        default: "Password for the master console"
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: (Required) Subnet to deploy the cluster into. Must be in the selected Security Group
 Mappings:
   InstanceTypes:
     4-vCPUs-16-GB-RAM-150-GB-SSD:
@@ -75,7 +112,7 @@ Mappings:
       AMI: ami-040b504c67641f0cc
     ap-south-1: # Asia Pacific (Mumbai)	
       AMI: ami-0dc886bce1f85f67e
-    ap-south-2 : # Asia Pacific (Hyderabad)
+    ap-south-2: # Asia Pacific (Hyderabad)
       AMI: ami-04d2538aa74707978
     ap-southeast-1: # Asia Pacific (Singapore)
       AMI: ami-0d21214905506a7f4
@@ -117,28 +154,42 @@ Mappings:
       AMI: ami-0ff832bdf91944651
     us-west-2: # US West (Oregon)
       AMI: ami-032f8589b3e7f4e5b
+
 Conditions:
-  isHTTPS: !Equals [ !Ref TLS, Enable]
-  isRandomPassword: !Equals [!Ref CustomPassword, ""]
+  cCheckHTTP: !Equals [ !Ref TLS, Enable] 
+  cGeneratePassword: !Equals [!Ref AuthenticationMasterPassword, ""]   
+  PublicIpAddress: !Equals [!Ref AssociatePublicIpAddress, "Yes"] 
+
+Rules:
+  SubnetsInVPC:
+    Assertions:
+      - Assert:
+          'Fn::EachMemberIn':
+            - 'Fn::ValueOfAll':
+                - 'AWS::EC2::Subnet::Id'
+                - VpcId
+            - 'Fn::RefAll': 'AWS::EC2::VPC::Id'
+        AssertDescription: The selected subnet must be in the VPC
+
 Resources:
-  DCSecretsManager:
+  rSecretManager:
     Type: AWS::SecretsManager::Secret
-    Condition: isRandomPassword
+    Condition: cGeneratePassword
     Properties:
       GenerateSecretString:
         SecretStringTemplate: '{"username": "dcadmin"}'
         GenerateStringKey: 'password'
         PasswordLength: 20
         ExcludePunctuation: true
-  DCRandomPassword:
+  rRandomPass:
     Type: AWS::SSM::Parameter
-    Condition: isRandomPassword
+    Condition: cGeneratePassword
     Properties:
       Name: RandomString
       Type: String
-      Value:
-        Fn::Sub: "{{resolve:secretsmanager:${DCSecretsManager}::password}}"
-  DataClarityInstance:
+      Value: 
+        Fn::Sub: "{{resolve:secretsmanager:${rSecretManager}::password}}"
+  rDClarityInstance:
     Type: AWS::EC2::Instance
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMI]
@@ -149,14 +200,15 @@ Resources:
             VolumeSize: !FindInMap [InstanceTypes, !Ref InstanceType, DiskSize]
             DeleteOnTermination: true
             VolumeType: gp2
+      KeyName: !Ref KeyPair
       UserData:
         Fn::Base64: !Sub
           - | 
             #!/bin/bash
                         
             # Install Docker and Docker Compose
-            apt-get update
-            apt-get install ca-certificates curl gnupg -y
+            sudo apt-get update
+            sudo apt-get install ca-certificates curl gnupg -y
             
             install -m 0755 -d /etc/apt/keyrings
             curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -181,9 +233,15 @@ Resources:
             chmod -R 777 /opt/dataclarity
             cd /opt/dataclarity/
             
+
             # Setup a self-signed certificate
             if [[ ${TLS} = "Enable" ]]; then
-              openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=${IP}" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt
+              sudo apt-get install -y certbot
+              sudo certbot certonly --standalone -d "${IP}" --register-unsafely-without-email --agree-tos --deploy-hook "cp /etc/letsencrypt/${IP}/privkey.pem /opt/dataclarity/assets/certs/dc/cert.key; cp /etc/letsencrypt/${IP}/fullchain.pem /opt/dataclarity/assets/certs/dc/cert.crt"
+              if [[ $? -ne 0 ]]; then
+                  openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=${IP}" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt
+              fi
+
               sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' docker-compose.yml
               sed -i 's|http://{host}|https://{host}|g' docker-compose.yml
               sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/notification/application.properties
@@ -194,12 +252,12 @@ Resources:
               rm assets/config/load-balancer/nginx_ssl.conf
             fi
             
-            # Update the entry point with the IP, in the config files
+            # Update the entry point with the Domain, in the config files
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" docker-compose.yml
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/notification/application.properties
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/ui/config.json
             
-            # Update password, in the env file
+            # Update dcadmin password, in the env file
             sed -i "s|\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=${PASSWORD}|g" .env
             
             if [[ ${RAM} = "16" ]]; then
@@ -219,55 +277,37 @@ Resources:
             docker compose up -d
           - TLS: !Ref TLS
             RAM: !FindInMap [InstanceTypes, !Ref InstanceType, RAM]
-            IP: $(curl http://checkip.amazonaws.com)
-            PASSWORD: !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
-      SecurityGroups:
-        - !Ref DCSecurityGroup
-  DCSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Enable SSH access via port 22
-      SecurityGroupIngress:
-      - CidrIp: 0.0.0.0/0
-        FromPort: 22
-        ToPort: 22
-        IpProtocol: tcp
-      - CidrIp: "0.0.0.0/0"
-        FromPort: 80
-        ToPort: 80
-        IpProtocol: tcp
-      - CidrIp: "0.0.0.0/0"
-        FromPort: 443
-        ToPort: 443
-        IpProtocol: tcp
+            IP: !If [PublicIpAddress, $(curl http://169.254.169.254/latest/meta-data/public-hostname), $(curl http://169.254.169.254/latest/meta-data/local-ipv4)]
+            PASSWORD: !If [cGeneratePassword, !GetAtt  rRandomPass.Value, !Ref AuthenticationMasterPassword]
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: !If [PublicIpAddress , "true", "false"]
+          SubnetId: !Ref Subnet
+          DeviceIndex: 0
+          GroupSet:
+          - !Ref SecurityGroup
 Outputs:
-  DataClarityURL:
-    Description: "Use this URL to access DataClarity"
+  ApplicationStartNotice:
+    Value: "Please note that it may take 5-10 minutes for the application to fully start. Please wait for the application to become operational before accessing the URL."
+  ApplicationURL:
+    Description: "Use these credentials to log into DataClarity. Username: admin | Password: admin. You will be required to change admin user password on the first login."
     Value:
       Fn::Join:
         - ""
-        - - !If [isHTTPS, "https://", "http://"]
-          - !GetAtt DataClarityInstance.PublicIp
+        - - !If [cCheckHTTP, "https://", "http://"]
+          - !If [PublicIpAddress, !GetAtt rDClarityInstance.PublicDnsName, !GetAtt rDClarityInstance.PrivateIp]
           - "/home"
-  DataClarityUsrPwd:
-    Description: "Use these credentials to log into DataClarity"
-    Value: "Username: admin | Password: admin"
-  DataClarityUsrPwdDesc:
-    Value: "You will be required to change your password on the first login."
-  MasterConsoleURL:
-    Description: "Use this URL to access the DataClarity Master Console"
+  ApplicationMasterConsoleURL:
+    Description: "Use this URL to access the DataClarity User Access Master Console"
     Value:
       Fn::Join:
         - ""
-        - - !If [isHTTPS, "https://", "http://"]
-          - !GetAtt DataClarityInstance.PublicIp
+        - - !If [cCheckHTTP, "https://", "http://"]
+          - !If [PublicIpAddress, !GetAtt rDClarityInstance.PublicDnsName, !GetAtt rDClarityInstance.PrivateIp]
           - "/auth/admin/master/console"
-  MasterConsoleUsrPwd:
-    Description: "Use these credentials to log into the DataClarity Master Console"
+  ApplicationMasterConsoleURLCredentials:
+    Description: "Use these credentials to log into DataClarity User Access Master Console."
     Value:
       Fn::Join:
         - ""
         - - "Username: dcadmin | Password: "
-          - !If [isRandomPassword, !GetAtt DCRandomPassword.Value, !Ref CustomPassword]
-  MasterConsoleUsrPwdDesc:
-    Value: "Updating the master console password is recommended on the first login."
+          - !If [cGeneratePassword, !GetAtt rRandomPass.Value, !Ref AuthenticationMasterPassword]
