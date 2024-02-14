@@ -237,7 +237,7 @@ Resources:
             # Setup a self-signed certificate
             if [[ ${TLS} = "Enable" ]]; then
               sudo apt-get install -y certbot
-              sudo certbot certonly --standalone -d "${IP}" --register-unsafely-without-email --agree-tos --deploy-hook "cp /etc/letsencrypt/${IP}/privkey.pem /opt/dataclarity/assets/certs/dc/cert.key; cp /etc/letsencrypt/${IP}/fullchain.pem /opt/dataclarity/assets/certs/dc/cert.crt"
+              sudo certbot certonly --standalone -d "${IP}" --register-unsafely-without-email --agree-tos --deploy-hook "cp /etc/letsencrypt/live/${IP}/privkey.pem /opt/dataclarity/assets/certs/dc/cert.key; cp /etc/letsencrypt/live/${IP}/fullchain.pem /opt/dataclarity/assets/certs/dc/cert.crt"
               if [[ $? -ne 0 ]]; then
                   openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=${IP}" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt
               fi
@@ -261,9 +261,9 @@ Resources:
             sed -i "s|\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=${PASSWORD}|g" .env
             
             if [[ ${RAM} = "16" ]]; then
-            sed -i "s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 9G|g" docker-compose.yml
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 12G|DRILLBIT_MAX_PROC_MEM: 10G|g" docker-compose.yml
             elif [[ ${RAM} = "64" ]]; then
-            sed -i "s|DRILLBIT_MAX_PROC_MEM: 24G|DRILLBIT_MAX_PROC_MEM: 48G|g" docker-compose.yml
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 12G|DRILLBIT_MAX_PROC_MEM: 48G|g" docker-compose.yml
             fi
             
             # Create the DataClarity persistent volumes
