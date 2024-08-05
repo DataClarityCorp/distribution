@@ -261,9 +261,9 @@ Resources:
             sed -i "s|\KEYCLOAK_PASSWORD=PXJ3WOymAYXYur6K|KEYCLOAK_PASSWORD=${PASSWORD}|g" .env
             
             if [[ ${RAM} = "16" ]]; then
-            sed -i "s|DRILLBIT_MAX_PROC_MEM: 12G|DRILLBIT_MAX_PROC_MEM: 10G|g" docker-compose.yml
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 16G|DRILLBIT_MAX_PROC_MEM: 10G|g" docker-compose.yml
             elif [[ ${RAM} = "64" ]]; then
-            sed -i "s|DRILLBIT_MAX_PROC_MEM: 12G|DRILLBIT_MAX_PROC_MEM: 48G|g" docker-compose.yml
+            sed -i "s|DRILLBIT_MAX_PROC_MEM: 16G|DRILLBIT_MAX_PROC_MEM: 48G|g" docker-compose.yml
             fi
             
             # Create the DataClarity persistent volumes
@@ -272,6 +272,7 @@ Resources:
             docker volume create zklogs
             docker volume create drill-dfs
             docker volume create screenshots-storage
+            docker volume create drill-jdbc
             
             # Create the DataClarity containers
             docker compose up -d
