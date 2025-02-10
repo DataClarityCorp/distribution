@@ -242,12 +242,14 @@ Resources:
                   openssl req -x509 -nodes -days 36500 -newkey rsa:2048 -subj "/CN=${IP}" -keyout assets/certs/dc/cert.key -out assets/certs/dc/cert.crt
               fi
 
+              rm assets/config/load-balancer/nginx.conf
+              mv assets/config/load-balancer/nginx_ssl.conf assets/config/load-balancer/nginx.conf
               sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' docker-compose.yml
               sed -i 's|http://{host}|https://{host}|g' docker-compose.yml
               sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/notification/application.properties
+              sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/scheduler/application.properties
+              sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/storyboards/config.properties
               sed -i 's|http://$PUBLIC_ENTRYPOINT|https://$PUBLIC_ENTRYPOINT|g' assets/config/ui/config.json
-              rm assets/config/load-balancer/nginx.conf
-              mv assets/config/load-balancer/nginx_ssl.conf assets/config/load-balancer/nginx.conf
             else
               rm assets/config/load-balancer/nginx_ssl.conf
             fi
@@ -255,6 +257,8 @@ Resources:
             # Update the entry point with the Domain, in the config files
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" docker-compose.yml
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/notification/application.properties
+            sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/scheduler/application.properties
+            sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/storyboards/config.properties
             sed -i "s|\$PUBLIC_ENTRYPOINT|${IP}|g" assets/config/ui/config.json
             
             # Update dcadmin password, in the env file
